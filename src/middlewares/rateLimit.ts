@@ -1,0 +1,40 @@
+import { Response, NextFunction } from 'express';
+import { AuthenticatedRequest } from '../types';
+import { checkRateLimit, getOrgPlanTier, logRateLimitEvent } from '../modules/rateLimit/rateLimit.service';
+import { AppError } from '../utils/error';
+
+export async function rateLimit(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  // Guard: this middleware only makes sense after authenticateApiKey has run
+  if (!req.org_id) {
+    return next(new AppError('rateLimit middleware requires org_id — check middleware order', 500));
+  }
+
+  const planTier = await getOrgPlanTier(req.org_id);
+  const result = await checkRateLimit(req.org_id, planTier);
+
+  // Always set headers — even on 429, so clients know when to retry
+  res.setHeader('X-RateLimit-Limit', result.limit);
+  res.setHeader('X-RateLimit-Remaining', result.remaining);
+  res.setHeader('X-RateLimit-Reset', result.resetAt);
+
+  if (!result.allowed) {
+    const retryAfter = result.resetAt - Math.floor(Date.now() / 1000);
+    res.setHeader('Retry-After', Math.max(1, retryAfter));
+
+    // Log for Phase 4 usage metering — fire and forget
+    logRateLimitEvent(req.org_id, req.path);
+
+    res.status(429).json({
+      error: 'Too Many Requests',
+      message: `Rate limit exceeded. Retry after ${retryAfter} seconds.`,
+      retryAfter,
+    });
+    return;
+  }
+
+  next();
+}

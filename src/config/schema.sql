@@ -46,3 +46,14 @@ CREATE TABLE IF NOT EXISTS api_keys (
 );
 
 CREATE INDEX IF NOT EXISTS idx_api_keys_key_hash ON api_keys(key_hash);
+
+-- RATE LIMIT EVENTS
+CREATE TABLE IF NOT EXISTS rate_limit_events (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id     UUID REFERENCES orgs(id) ON DELETE CASCADE,
+  endpoint   TEXT NOT NULL,
+  limited_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- query pattern in Phase 4: "how many times was org X throttled this billing period?"
+CREATE INDEX IF NOT EXISTS idx_rle_org_limited_at ON rate_limit_events(org_id, limited_at);
