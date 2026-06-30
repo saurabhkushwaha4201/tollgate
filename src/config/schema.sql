@@ -1,0 +1,34 @@
+-- USERS
+CREATE TABLE IF NOT EXISTS users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email VARCHAR(255) UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ORGS
+CREATE TABLE IF NOT EXISTS orgs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR(255) NOT NULL,
+  slug VARCHAR(255) UNIQUE NOT NULL,
+  plan_tier VARCHAR(50) DEFAULT 'free',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ORG MEMBERS (join table)
+CREATE TABLE IF NOT EXISTS org_members (
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  org_id UUID REFERENCES orgs(id) ON DELETE CASCADE,
+  role VARCHAR(50) NOT NULL DEFAULT 'member',
+  joined_at TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (user_id, org_id)
+);
+
+-- REFRESH TOKENS
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT UNIQUE NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
