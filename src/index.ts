@@ -4,6 +4,7 @@ import { db } from './config/db'
 import { redis } from './config/redis'
 import authRoutes from './modules/auth/auth.routes'
 import orgRoutes from './modules/org/org.routes'
+import apiKeyRoutes from './modules/apiKey/apiKey.routes'
 import { AppError } from './utils/error'
 import { ZodError } from 'zod'
 dotenv.config()
@@ -22,6 +23,7 @@ app.get('/health', async (req, res) => {
 })
 app.use('/auth', authRoutes)
 app.use('/orgs', orgRoutes)
+app.use('/orgs/:orgId/api-keys', apiKeyRoutes)
 
 // Global error handler — must have 4 params for Express to recognize it
 app.use((err: any, req: Request, res: Response, next: NextFunction) => {
