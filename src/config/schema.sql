@@ -56,4 +56,37 @@ CREATE TABLE IF NOT EXISTS rate_limit_events (
 );
 
 -- query pattern in Phase 4: "how many times was org X throttled this billing period?"
-CREATE INDEX IF NOT EXISTS idx_rle_org_limited_at ON rate_limit_events(org_id, limited_at);
+CREATE INDEX IF NOT EXISTS idx_rle_org_limited_at ON rate_limit_events(org_id, limited_at);
+
+-- USAGE EVENTS (raw event log — one row per API request, append-only)
+CREATE TABLE IF NOT EXISTS usage_events (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id      UUID REFERENCES orgs(id) ON DELETE CASCADE,
+  api_key_id  UUID REFERENCES api_keys(id) ON DELETE SET NULL,
+  endpoint    TEXT NOT NULL,
+  method      VARCHAR(10) NOT NULL,
+  status_code INTEGER,               -- NULL for allowed (controller sets real code); 429 for throttled
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Nearly every query filters by org + time range
+CREATE INDEX IF NOT EXISTS idx_usage_events_org_time
+  ON usage_events(org_id, created_at DESC);
+
+-- USAGE SUMMARIES (hourly rollups — what billing reads, not raw events)
+CREATE TABLE IF NOT EXISTS usage_summaries (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id         UUID REFERENCES orgs(id) ON DELETE CASCADE,
+  period_start   TIMESTAMPTZ NOT NULL,   -- truncated to hour e.g. 2025-01-15 14:00:00+00
+  period_end     TIMESTAMPTZ NOT NULL,   -- period_start + 1 hour
+  request_count  INTEGER NOT NULL DEFAULT 0,
+  throttle_count INTEGER NOT NULL DEFAULT 0,
+  created_at     TIMESTAMPTZ DEFAULT NOW(),
+  updated_at     TIMESTAMPTZ DEFAULT NOW(),
+
+  UNIQUE(org_id, period_start)   -- required for upsert idempotency in aggregation job
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_summaries_org_period
+  ON usage_summaries(org_id, period_start DESC);
+

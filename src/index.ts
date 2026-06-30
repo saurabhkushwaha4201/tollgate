@@ -6,6 +6,8 @@ import authRoutes from './modules/auth/auth.routes'
 import orgRoutes from './modules/org/org.routes'
 import apiKeyRoutes from './modules/apiKey/apiKey.routes'
 import rateLimitRoutes from './modules/rateLimit/rateLimit.routes'
+import usageRoutes from './modules/usage/usage.routes'
+import { startAggregationJob } from './jobs/aggregateUsage'
 import { AppError } from './utils/error'
 import { ZodError } from 'zod'
 dotenv.config()
@@ -25,6 +27,7 @@ app.get('/health', async (req, res) => {
 app.use('/auth', authRoutes)
 app.use('/orgs', orgRoutes)
 app.use('/orgs/:orgId/api-keys', apiKeyRoutes)
+app.use('/orgs/:orgId/usage', usageRoutes)
 app.use('/v1', rateLimitRoutes)
 
 // Global error handler — must have 4 params for Express to recognize it
@@ -55,6 +58,7 @@ if (process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`)
   })
+  startAggregationJob()
 }
 
 export default app;

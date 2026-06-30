@@ -1,6 +1,7 @@
 import { Response, NextFunction } from 'express';
 import { AuthenticatedRequest } from '../types';
 import { checkRateLimit, getOrgPlanTier, logRateLimitEvent } from '../modules/rateLimit/rateLimit.service';
+import { recordUsageEvent } from '../modules/usage/usage.service';
 import { AppError } from '../utils/error';
 
 export async function rateLimit(
@@ -28,6 +29,15 @@ export async function rateLimit(
     // Log for Phase 4 usage metering — fire and forget
     logRateLimitEvent(req.org_id, req.path);
 
+    // Record throttled event — status_code 429 is definitive here
+    recordUsageEvent({
+      orgId: req.org_id,
+      apiKeyId: req.api_key_id,
+      endpoint: req.path,
+      method: req.method,
+      statusCode: 429,
+    });
+
     res.status(429).json({
       error: 'Too Many Requests',
       message: `Rate limit exceeded. Retry after ${retryAfter} seconds.`,
@@ -35,6 +45,15 @@ export async function rateLimit(
     });
     return;
   }
+
+  // Record allowed event — null status_code (controller sets the real code)
+  recordUsageEvent({
+    orgId: req.org_id,
+    apiKeyId: req.api_key_id,
+    endpoint: req.path,
+    method: req.method,
+    statusCode: null,
+  });
 
   next();
 }
