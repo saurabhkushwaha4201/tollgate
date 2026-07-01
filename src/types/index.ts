@@ -2,6 +2,7 @@ import { Request } from 'express';
 
 export type PlanTier = 'free' | 'pro' | 'enterprise'
 export type Role = 'owner' | 'admin' | 'member'
+export type PaymentStatus = 'active' | 'past_due' | 'canceled'
 
 export interface User {
   id: string
@@ -14,6 +15,9 @@ export interface Org {
   name: string
   slug: string
   plan_tier: PlanTier
+  payment_status: PaymentStatus           // 'active' | 'past_due' | 'canceled'
+  stripe_customer_id: string | null       // null until first checkout
+  stripe_subscription_id: string | null   // null on free plan
   created_at: Date
 }
 

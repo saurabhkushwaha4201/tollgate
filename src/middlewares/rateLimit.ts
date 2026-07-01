@@ -1,6 +1,11 @@
 import { Response, NextFunction } from 'express';
 import { AuthenticatedRequest } from '../types';
-import { checkRateLimit, getOrgPlanTier, logRateLimitEvent } from '../modules/rateLimit/rateLimit.service';
+import {
+  checkRateLimit,
+  getOrgPlanTier,
+  getOrgPaymentStatus,
+  logRateLimitEvent,
+} from '../modules/rateLimit/rateLimit.service';
 import { recordUsageEvent } from '../modules/usage/usage.service';
 import { AppError } from '../utils/error';
 
@@ -12,6 +17,25 @@ export async function rateLimit(
   // Guard: this middleware only makes sense after authenticateApiKey has run
   if (!req.org_id) {
     return next(new AppError('rateLimit middleware requires org_id — check middleware order', 500));
+  }
+
+  // Payment status check runs before rate limiting.
+  // 'canceled' is a hard stop — the subscription is definitively over.
+  // 'past_due' is a grace period — still serve them, but signal the client.
+  const paymentStatus = await getOrgPaymentStatus(req.org_id);
+
+  if (paymentStatus === 'canceled') {
+    res.status(402).json({
+      error: 'Payment Required',
+      message: 'Your subscription has been canceled. Please renew to continue.',
+    });
+    return;
+  }
+
+  if (paymentStatus === 'past_due') {
+    // Warn the client but allow the request through.
+    // Blocking past_due immediately hurts conversion — give them a chance to pay.
+    res.setHeader('X-Billing-Status', 'past_due');
   }
 
   const planTier = await getOrgPlanTier(req.org_id);
@@ -57,3 +81,4 @@ export async function rateLimit(
 
   next();
 }
+
