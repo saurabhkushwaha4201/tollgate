@@ -89,4 +89,31 @@ CREATE TABLE IF NOT EXISTS usage_summaries (
 
 CREATE INDEX IF NOT EXISTS idx_usage_summaries_org_period
   ON usage_summaries(org_id, period_start DESC);
+
+-- BILLING: New columns on orgs
+-- stripe_customer_id: created on first checkout, used as fallback org lookup in webhooks
+-- stripe_subscription_id: updated by checkout.session.completed, cleared on subscription.deleted
+-- payment_status: 'active' | 'past_due' | 'canceled' — separate from plan_tier
+--   (org can be on pro but past_due: they haven't paid yet but still in grace period)
+ALTER TABLE orgs
+  ADD COLUMN IF NOT EXISTS stripe_customer_id     TEXT UNIQUE,
+  ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT UNIQUE,
+  ADD COLUMN IF NOT EXISTS payment_status         TEXT NOT NULL DEFAULT 'active';
+
+-- BILLING EVENTS (immutable audit log — never delete rows from this table)
+-- stripe_event_id UNIQUE is the most critical constraint in this phase:
+-- Stripe delivers webhooks at-least-once. The second delivery of the same event
+-- hits a unique violation (23505), which we catch and silently ignore.
+-- Without this, double-processing a payment is a real bug class.
+CREATE TABLE IF NOT EXISTS billing_events (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id          UUID REFERENCES orgs(id) ON DELETE CASCADE,
+  stripe_event_id TEXT NOT NULL UNIQUE,
+  event_type      TEXT NOT NULL,
+  payload         JSONB NOT NULL,
+  processed_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_events_org
+  ON billing_events(org_id, processed_at DESC);
 

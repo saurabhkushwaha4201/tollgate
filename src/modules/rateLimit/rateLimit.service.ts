@@ -3,7 +3,7 @@ import { redis } from '../../config/redis';
 import { db } from '../../config/db';
 import { RATE_LIMITS, DEFAULT_RATE_LIMIT } from '../../config/rateLimits';
 import { SLIDING_WINDOW_SCRIPT } from './rateLimit.lua';
-import { PlanTier } from '../../types';
+import { PlanTier, PaymentStatus } from '../../types';
 
 export interface RateLimitResult {
   allowed: boolean;
@@ -71,4 +71,21 @@ export function logRateLimitEvent(orgId: string, endpoint: string): void {
   ).catch(err => {
     console.error('[rateLimit] failed to log event:', err);
   });
+}
+
+// Returns the org's current payment status for enforcement in the rateLimit middleware.
+// Fails open to 'active' on any DB error — a billing query failure should never
+// take down the API request pipeline. The column-missing case (pre-migration) is
+// also handled this way.
+export async function getOrgPaymentStatus(orgId: string): Promise<PaymentStatus> {
+  try {
+    const result = await db.query<{ payment_status: PaymentStatus }>(
+      'SELECT payment_status FROM orgs WHERE id = $1',
+      [orgId]
+    );
+    return result.rows[0]?.payment_status ?? 'active';
+  } catch {
+    // Fail open — don't block requests due to a billing DB error
+    return 'active';
+  }
 }

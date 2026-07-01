@@ -7,12 +7,23 @@ import orgRoutes from './modules/org/org.routes'
 import apiKeyRoutes from './modules/apiKey/apiKey.routes'
 import rateLimitRoutes from './modules/rateLimit/rateLimit.routes'
 import usageRoutes from './modules/usage/usage.routes'
+import billingRoutes from './modules/billing/billing.routes'
+import webhookRouter from './modules/billing/webhook.routes'
+import { rawBody } from './middlewares/rawBody'
 import { startAggregationJob } from './jobs/aggregateUsage'
 import { AppError } from './utils/error'
 import { ZodError } from 'zod'
 dotenv.config()
 
 const app = express()
+
+// ⚠️  WEBHOOK ROUTE MUST BE REGISTERED BEFORE express.json()
+// Stripe's signature verification requires the raw request bytes.
+// express.json() parses and discards them — once gone, constructEvent() always fails.
+// The rawBody middleware uses express.raw() to preserve the Buffer on req.body.
+app.use('/billing/webhook', rawBody, webhookRouter)
+
+// Global JSON parser for all other routes
 app.use(express.json())
 
 app.get('/health', async (req, res) => {
@@ -26,9 +37,11 @@ app.get('/health', async (req, res) => {
 })
 app.use('/auth', authRoutes)
 app.use('/orgs', orgRoutes)
+app.use('/orgs', billingRoutes)          // billing routes: /:orgId/billing/...
 app.use('/orgs/:orgId/api-keys', apiKeyRoutes)
 app.use('/orgs/:orgId/usage', usageRoutes)
 app.use('/v1', rateLimitRoutes)
+
 
 // Global error handler — must have 4 params for Express to recognize it
 app.use((err: any, req: Request, res: Response, next: NextFunction) => {
