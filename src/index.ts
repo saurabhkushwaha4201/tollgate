@@ -13,9 +13,15 @@ import { rawBody } from './middlewares/rawBody'
 import { startAggregationJob } from './jobs/aggregateUsage'
 import { AppError } from './utils/error'
 import { ZodError } from 'zod'
+import { logger } from './config/logger'
+import { requestId } from './middlewares/requestId'
+import { requestLogger } from './middlewares/requestLogger'
 dotenv.config()
 
 const app = express()
+
+app.use(requestId)
+app.use(requestLogger)
 
 // ⚠️  WEBHOOK ROUTE MUST BE REGISTERED BEFORE express.json()
 // Stripe's signature verification requires the raw request bytes.
@@ -62,16 +68,51 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
   }
 
   // Unknown errors
-  console.error(err)
+  logger.error({ err }, 'Internal server error')
   res.status(500).json({ error: 'Internal server error' })
 })
 const PORT = process.env.PORT || 3000;
 
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`)
+  const server = app.listen(PORT, () => {
+    logger.info({ port: PORT }, 'Tollgate API started')
   })
+  
   startAggregationJob()
+
+  async function shutdown(signal: string) {
+    logger.info({ signal }, 'Shutdown signal received');
+
+    server.close(async () => {
+      logger.info('HTTP server closed — draining connections');
+
+      try {
+        await db.end();
+        logger.info('PostgreSQL pool closed');
+      } catch (err) {
+        logger.error({ err }, 'Error closing PostgreSQL pool');
+      }
+
+      try {
+        await redis.quit();
+        logger.info('Redis connection closed');
+      } catch (err) {
+        logger.error({ err }, 'Error closing Redis connection');
+      }
+
+      logger.info('Shutdown complete');
+      process.exit(0);
+    });
+
+    // Force exit if graceful shutdown takes too long
+    setTimeout(() => {
+      logger.error('Forced shutdown after timeout');
+      process.exit(1);
+    }, 10_000);
+  }
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT',  () => shutdown('SIGINT'));
 }
 
 export default app;

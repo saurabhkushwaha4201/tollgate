@@ -1,6 +1,7 @@
 import { stripe } from '../../config/stripe';
 import { db } from '../../config/db';
 import Stripe from 'stripe';
+import { logger } from '../../config/logger';
 
 // ---------------------------------------------------------------------------
 // Main webhook handler — called by the webhook route controller
@@ -44,12 +45,12 @@ export async function handleWebhook(rawBody: Buffer, signature: string): Promise
       default:
         // Unknown event types are fine — Stripe sends many event types we don't care about.
         // Log and fall through to the billing_events insert (good for audit trail).
-        console.log(`[webhook] unhandled event type: ${event.type}`);
+        logger.info({ eventType: event.type, context: 'webhook' }, 'unhandled event type');
     }
   } catch (err) {
     // Handler threw — do not insert into billing_events.
     // Stripe will retry. Log the error so it's visible.
-    console.error(`[webhook] handler failed for event ${event.id} (${event.type}):`, err);
+    logger.error({ err, eventId: event.id, eventType: event.type, context: 'webhook' }, 'handler failed');
     throw err;
   }
 
@@ -71,13 +72,13 @@ export async function handleWebhook(rawBody: Buffer, signature: string): Promise
   } catch (err: any) {
     if (err.code === '23505') {
       // Unique violation = concurrent delivery, both handlers ran cleanly
-      console.log(`[webhook] duplicate event insert ignored: ${event.id}`);
+      logger.info({ eventId: event.id, context: 'webhook' }, 'duplicate event insert ignored');
       return;
     }
     // Any other DB error: log but don't re-throw.
     // The handler succeeded and Stripe already has our 200.
     // A billing_events insert failure is an audit concern, not a data integrity one.
-    console.error(`[webhook] billing_events insert failed for ${event.id}:`, err);
+    logger.error({ err, eventId: event.id, context: 'webhook' }, 'billing_events insert failed');
   }
 }
 
@@ -88,7 +89,7 @@ export async function handleWebhook(rawBody: Buffer, signature: string): Promise
 async function onCheckoutCompleted(session: Stripe.Checkout.Session) {
   const orgId = session.metadata?.org_id;
   if (!orgId) {
-    console.warn('[webhook] checkout.session.completed missing org_id in metadata');
+    logger.warn({ context: 'webhook' }, 'checkout.session.completed missing org_id in metadata');
     return;
   }
 
@@ -108,7 +109,7 @@ async function onCheckoutCompleted(session: Stripe.Checkout.Session) {
     [planTier, subscription.id, orgId]
   );
 
-  console.log(`[webhook] org ${orgId} upgraded to ${planTier}`);
+  logger.info({ orgId, planTier, context: 'webhook' }, 'org upgraded');
 }
 
 async function onPaymentSucceeded(invoice: Stripe.Invoice) {
@@ -119,7 +120,7 @@ async function onPaymentSucceeded(invoice: Stripe.Invoice) {
     ?? await orgIdFromCustomer(invoice.customer as string);
 
   if (!orgId) {
-    console.warn('[webhook] invoice.payment_succeeded: could not resolve org_id');
+    logger.warn({ context: 'webhook' }, 'invoice.payment_succeeded: could not resolve org_id');
     return;
   }
 
@@ -132,13 +133,13 @@ async function onPaymentSucceeded(invoice: Stripe.Invoice) {
   // for the just-closed billing period and call stripe.subscriptionItems.createUsageRecord()
   // before the invoice finalizes. Phase 5b concern.
 
-  console.log(`[webhook] org ${orgId} payment succeeded`);
+  logger.info({ orgId, context: 'webhook' }, 'org payment succeeded');
 }
 
 async function onPaymentFailed(invoice: Stripe.Invoice) {
   const orgId = await orgIdFromCustomer(invoice.customer as string);
   if (!orgId) {
-    console.warn('[webhook] invoice.payment_failed: could not resolve org_id');
+    logger.warn({ context: 'webhook' }, 'invoice.payment_failed: could not resolve org_id');
     return;
   }
 
@@ -151,7 +152,7 @@ async function onPaymentFailed(invoice: Stripe.Invoice) {
   );
 
   // Production: send email notification via SendGrid/Resend here.
-  console.log(`[webhook] org ${orgId} payment failed — status set to past_due`);
+  logger.info({ orgId, context: 'webhook' }, 'org payment failed — status set to past_due');
 }
 
 async function onSubscriptionDeleted(subscription: Stripe.Subscription) {
@@ -160,7 +161,7 @@ async function onSubscriptionDeleted(subscription: Stripe.Subscription) {
     ?? await orgIdFromCustomer(subscription.customer as string);
 
   if (!orgId) {
-    console.warn('[webhook] customer.subscription.deleted: could not resolve org_id');
+    logger.warn({ context: 'webhook' }, 'customer.subscription.deleted: could not resolve org_id');
     return;
   }
 
@@ -176,7 +177,7 @@ async function onSubscriptionDeleted(subscription: Stripe.Subscription) {
     [orgId]
   );
 
-  console.log(`[webhook] org ${orgId} subscription deleted — downgraded to free`);
+  logger.info({ orgId, context: 'webhook' }, 'org subscription deleted — downgraded to free');
 }
 
 // ---------------------------------------------------------------------------

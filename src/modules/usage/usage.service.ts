@@ -1,4 +1,5 @@
 import { db } from '../../config/db';
+import { logger } from '../../config/logger';
 
 export interface UsageEventInput {
   orgId: string;
@@ -15,7 +16,7 @@ export function recordUsageEvent(input: UsageEventInput): void {
      VALUES ($1, $2, $3, $4, $5)`,
     [input.orgId, input.apiKeyId ?? null, input.endpoint, input.method, input.statusCode]
   ).catch(err => {
-    console.error('[usage] failed to record usage event:', err);
+    logger.error({ err, context: 'recordUsageEvent' }, 'failed to record usage event');
   });
 }
 

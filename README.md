@@ -51,6 +51,20 @@ issuance, rate limiting, usage metering, and Stripe billing.
 - **Resilient Webhooks:** Webhook handlers feature strict HMAC signature verification and an idempotent processing pipeline to safely handle Stripe retries.
 - **Decoupled Architecture:** Webhooks update the organization's `plan_tier` in the database, allowing the rate limiter to seamlessly adapt to the new tier on the very next request—maintaining zero direct coupling between the billing and rate-limiting modules.
 
+## 🏗️ Data Model
+
+| Table | Purpose |
+|---|---|
+| users | Authentication identities |
+| orgs | Tenant units, owns plan_tier and Stripe state |
+| org_members | RBAC join table (user ↔ org ↔ role) |
+| refresh_tokens | Hashed refresh token store |
+| api_keys | Hashed API credentials per org |
+| rate_limit_events | 429 event log feeding usage metering |
+| usage_events | Per-request raw event log |
+| usage_summaries | Hourly aggregated rollups for billing queries |
+| billing_events | Idempotent Stripe webhook audit log |
+
 ---
 
 ## 🚀 Local Setup
@@ -176,4 +190,4 @@ The architectural and engineering trade-offs that make this system robust are th
 - [x] **Phase 3** — Rate Limiting (Redis sliding window)
 - [x] **Phase 4** — Usage Metering
 - [x] **Phase 5** — Billing & Webhooks (Stripe)
-- [ ] **Phase 6** — Polish & Resume Prep
+- [x] **Phase 6** — Polish & Resume Prep

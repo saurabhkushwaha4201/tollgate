@@ -2,6 +2,7 @@ import { db } from '../../config/db';
 import { generateApiKey, hashApiKey } from '../../utils/apiKey';
 import { CreateApiKeyInput } from './apiKey.schema';
 import { AppError } from '../../utils/error';
+import { logger } from '../../config/logger';
 
 export async function createApiKey(orgId: string, input: CreateApiKeyInput) {
   const { fullKey, prefix, hash } = generateApiKey(input.env);
@@ -67,6 +68,6 @@ export function updateLastUsed(keyId: string): void {
     [keyId]
   ).catch((err: any) => {
     // log but never throw — this must not affect the request
-    console.error('[apiKey] last_used_at update failed:', err);
+    logger.error({ err, context: 'updateLastUsed' }, 'fire-and-forget update failed');
   });
 }

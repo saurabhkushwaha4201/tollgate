@@ -4,12 +4,14 @@ import { db } from '../../config/db';
 import { RATE_LIMITS, DEFAULT_RATE_LIMIT } from '../../config/rateLimits';
 import { SLIDING_WINDOW_SCRIPT } from './rateLimit.lua';
 import { PlanTier, PaymentStatus } from '../../types';
+import { logger } from '../../config/logger';
 
 export interface RateLimitResult {
   allowed: boolean;
   limit: number;
   remaining: number;
   resetAt: number;   // unix timestamp (seconds)
+  bypassed?: boolean;
 }
 
 // SHA of the loaded script — cached after first SCRIPT LOAD
@@ -40,7 +42,15 @@ export async function checkRateLimit(orgId: string, planTier: PlanTier): Promise
       const freshSha = await getScriptSha();
       result = await redis.evalsha(freshSha, 1, key, String(now), String(config.windowMs), String(config.requests), reqId) as [number, number, number];
     } else {
-      throw err;
+      // Redis is down or unreachable — fail open
+      logger.error({ err, orgId }, 'Redis unavailable — rate limit bypassed');
+      return {
+        allowed: true,
+        limit: 0,
+        remaining: -1,       // sentinel: -1 means "unknown, Redis down"
+        resetAt: 0,
+        bypassed: true,      // flag for the middleware
+      };
     }
   }
 
@@ -69,7 +79,7 @@ export function logRateLimitEvent(orgId: string, endpoint: string): void {
     'INSERT INTO rate_limit_events (org_id, endpoint) VALUES ($1, $2)',
     [orgId, endpoint]
   ).catch(err => {
-    console.error('[rateLimit] failed to log event:', err);
+    logger.error({ err, context: 'logRateLimitEvent' }, 'failed to log event');
   });
 }
 

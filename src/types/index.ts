@@ -36,6 +36,7 @@ export interface AuthenticatedRequest extends Request {
   };
   org_id?: string;
   api_key_id?: string;   // set by authenticateApiKey — used for usage_events FK
+  requestId?: string;
 }
 
 export interface ApiKey {

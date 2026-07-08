@@ -41,6 +41,11 @@ export async function rateLimit(
   const planTier = await getOrgPlanTier(req.org_id);
   const result = await checkRateLimit(req.org_id, planTier);
 
+  if (result.bypassed) {
+    res.setHeader('X-RateLimit-Bypass', 'redis_unavailable');
+    return next();
+  }
+
   // Always set headers — even on 429, so clients know when to retry
   res.setHeader('X-RateLimit-Limit', result.limit);
   res.setHeader('X-RateLimit-Remaining', result.remaining);
