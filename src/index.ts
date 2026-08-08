@@ -23,7 +23,7 @@ const app = express()
 app.use(requestId)
 app.use(requestLogger)
 
-// ⚠️  WEBHOOK ROUTE MUST BE REGISTERED BEFORE express.json()
+// WEBHOOK ROUTE MUST BE REGISTERED BEFORE express.json()
 // Stripe's signature verification requires the raw request bytes.
 // express.json() parses and discards them — once gone, constructEvent() always fails.
 // The rawBody middleware uses express.raw() to preserve the Buffer on req.body.

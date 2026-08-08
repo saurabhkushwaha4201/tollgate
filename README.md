@@ -2,7 +2,6 @@
 
 > **API infrastructure for multi-tenant SaaS — authentication, rate limiting, usage metering, and Stripe billing in one unified backend.**
 
----
 
 ## 📖 What it is
 
@@ -10,7 +9,29 @@ Tollgate is a production-grade multi-tenant API backend covering the
 full lifecycle of a SaaS product — from org signup through API key 
 issuance, rate limiting, usage metering, and Stripe billing.
 
+## ☁️ Live Deployment
 
+This API is deployed and actively running in the cloud.
+- **Live Base URL:** `https://tollgate-api.onrender.com`
+- **Cloud Stack:** 
+  - Backend hosted on **Render** (Node.js/Express)
+  - Database hosted on **Neon** (Serverless PostgreSQL)
+  - Caching & Rate Limiting hosted on **Upstash** (Serverless Redis)
+
+### Test the Live API
+
+**1. Health Check (No Auth Required)**
+You can hit the live server's health check right now from your terminal to verify the database and cache connections:
+```bash
+curl -X GET https://tollgate-api.onrender.com/health
+```
+
+**2. Authenticate (Demo Account)**
+You can generate a live JWT access token using these read-only demo credentials:
+- **Email:** `demo@tollgate.io`
+- **Password:** `Demo1234!`
+
+*(Note: Make sure to actually register this demo account in your live database!)*
 
 ## 💻 Tech Stack
 
@@ -21,7 +42,7 @@ issuance, rate limiting, usage metering, and Stripe billing.
 | **Database** | PostgreSQL 16 | Org/user/billing state, usage_events, usage_summaries |
 | **Cache & State**| Redis 7 | Sliding window rate limit buckets per org (sorted sets) |
 | **Billing** | Stripe | Checkout sessions, subscription lifecycle, webhook events |
-| **Infrastructure**| Docker Compose | Local Postgres + Redis orchestration |
+| **Infrastructure**| Render, Neon, Upstash, Docker | Cloud serverless deployment & Local container orchestration |
 
 ## ✨ Core Features
 
