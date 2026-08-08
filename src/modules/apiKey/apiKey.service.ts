@@ -68,6 +68,7 @@ export function updateLastUsed(keyId: string): void {
     [keyId]
   ).catch((err: any) => {
     // log but never throw — this must not affect the request
+    // console.error('[apiKey] last_used_at update failed:', err);
     logger.error({ err, context: 'updateLastUsed' }, 'fire-and-forget update failed');
   });
 }

@@ -79,6 +79,7 @@ export function logRateLimitEvent(orgId: string, endpoint: string): void {
     'INSERT INTO rate_limit_events (org_id, endpoint) VALUES ($1, $2)',
     [orgId, endpoint]
   ).catch(err => {
+    // console.error('[rateLimit] failed to log event:', err);
     logger.error({ err, context: 'logRateLimitEvent' }, 'failed to log event');
   });
 }

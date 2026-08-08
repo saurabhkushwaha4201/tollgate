@@ -33,6 +33,7 @@ export async function webhookController(
     // Handler failed — return 400 so Stripe retries.
     // We deliberately do NOT return 500 here. 500 also triggers retries
     // but signals our infrastructure is down. 400 is cleaner and still retries.
+    // console.error('[webhook] processing error:', err);
     logger.error({ err, context: 'webhookController' }, 'processing error');
     res.status(400).json({ error: 'Webhook processing failed' });
   }

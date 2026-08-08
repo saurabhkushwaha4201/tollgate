@@ -68,6 +68,7 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
   }
 
   // Unknown errors
+  // console.error(err)
   logger.error({ err }, 'Internal server error')
   res.status(500).json({ error: 'Internal server error' })
 })
@@ -75,11 +76,12 @@ const PORT = process.env.PORT || 3000;
 
 if (process.env.NODE_ENV !== 'test') {
   const server = app.listen(PORT, () => {
+    // console.log(`Server running on port ${PORT}`)
     logger.info({ port: PORT }, 'Tollgate API started')
   })
   
   startAggregationJob()
-
+  
   async function shutdown(signal: string) {
     logger.info({ signal }, 'Shutdown signal received');
 

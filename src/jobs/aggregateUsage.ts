@@ -38,14 +38,17 @@ export function startAggregationJob(): void {
 
   // Run once immediately on boot to catch any missed window from previous restart
   runAggregation().catch(err => {
+    // console.error('[aggregateUsage] initial run failed:', err);
     logger.error({ err, context: 'aggregateUsage' }, 'initial run failed');
   });
 
   setInterval(() => {
     runAggregation().catch(err => {
+      // console.error('[aggregateUsage] scheduled run failed:', err);
       logger.error({ err, context: 'aggregateUsage' }, 'scheduled run failed');
     });
   }, ONE_HOUR);
 
+  // console.log('[aggregateUsage] job started — runs every hour');
   logger.info({ context: 'aggregateUsage' }, 'job started — runs every hour');
 }
