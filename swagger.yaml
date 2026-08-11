@@ -1,0 +1,487 @@
+openapi: 3.0.0
+info:
+  title: Tollgate SaaS API
+  description: >
+    Production-grade multi-tenant API backend covering the full lifecycle of a SaaS product —
+    from org signup through API key issuance, rate limiting, usage metering, and Stripe billing.
+  version: 1.0.0
+servers:
+  - url: https://tollgate-api.onrender.com
+    description: Live Production Environment
+  - url: http://localhost:3000
+    description: Local Development Environment
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Enter your 15-minute access token.
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: Enter your generated API key for rate-limited routes.
+  
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          example: 'Internal server error'
+        message:
+          type: string
+          example: 'Optional detailed message'
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Health Check
+  - name: Auth
+  - name: Organizations & Members
+  - name: API Keys
+  - name: Rate Limiting
+  - name: Usage Metering
+  - name: Billing & Stripe
+
+paths:
+  /health:
+    get:
+      tags:
+        - Health Check
+      summary: System Health Check
+      description: Zero-friction "does the whole stack breathe" check. Verifies Postgres and Redis connectivity.
+      security: []
+      responses:
+        '200':
+          description: Systems operational
+          content:
+            application/json:
+              example:
+                status: 'ok'
+                postgres: 'connected'
+                redis: 'connected'
+
+  /auth/register:
+    post:
+      tags:
+        - Auth
+      summary: Register a new user and organization
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  example: your_email@example.com
+                password:
+                  type: string
+                  example: StrongPassword123!
+                orgName:
+                  type: string
+                  example: My Organization
+      responses:
+        '201':
+          description: Registration successful, returns tokens and org details.
+        '400':
+          description: Validation error
+        '409':
+          description: Email or Org Name already in use
+
+  /auth/login:
+    post:
+      tags:
+        - Auth
+      summary: User Login
+      description: Authenticate and receive a 15-minute JWT and a 7-day refresh token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  example: your_email@example.com
+                password:
+                  type: string
+                  example: StrongPassword123!
+      responses:
+        '200':
+          description: Login successful
+        '401':
+          description: Invalid credentials
+        '429':
+          description: Too many login attempts
+
+  /auth/refresh:
+    post:
+      tags:
+        - Auth
+      summary: Refresh Access Token
+      description: >
+        Exercises the refresh-token rotation (15-min JWT + hashed 7-day refresh token).
+        Submitting a valid refresh token returns a new access token AND a newly rotated refresh token.
+        Reusing an already-used refresh token will trigger theft-detection and revoke all sessions for the user.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refreshToken:
+                  type: string
+                  example: "your_refresh_token_here"
+      responses:
+        '200':
+          description: Refresh successful
+        '401':
+          description: Invalid or expired refresh token
+
+  /auth/logout:
+    post:
+      tags:
+        - Auth
+      summary: User Logout
+      description: Logs the user out by deleting their refresh token from the database. No Bearer auth required. The refresh token itself acts as proof of session, allowing clients with expired access tokens to cleanly log out.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refreshToken:
+                  type: string
+                  example: "your_refresh_token_here"
+      responses:
+        '200':
+          description: Logged out successfully
+
+  /auth/me:
+    get:
+      tags:
+        - Auth
+      summary: Get Current User Profile
+      responses:
+        '200':
+          description: User profile and associated orgs
+
+  /orgs/{orgId}:
+    get:
+      tags:
+        - Organizations & Members
+      summary: Get Organization Details
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Organization details
+
+  /orgs/{orgId}/members:
+    get:
+      tags:
+        - Organizations & Members
+      summary: List Organization Members
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of members
+
+  /orgs/{orgId}/members/invite:
+    post:
+      tags:
+        - Organizations & Members
+      summary: Invite a User to Organization
+      description: Requires 'admin' role.
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  example: newuser@example.com
+                role:
+                  type: string
+                  enum: [admin, member]
+      responses:
+        '201':
+          description: User invited
+
+  /orgs/{orgId}/members/{uid}:
+    patch:
+      tags:
+        - Organizations & Members
+      summary: Update Member Role
+      description: >
+        Exercises RBAC logic (owner promoting/demoting a member).
+        Only accessible by org owners. Prevents self-modification and prevents assigning/changing the 'owner' role.
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: uid
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role:
+                  type: string
+                  enum: [admin, member]
+      responses:
+        '200':
+          description: Role updated
+    delete:
+      tags:
+        - Organizations & Members
+      summary: Remove Member from Organization
+      description: Requires 'admin' role. Owners cannot be removed.
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: uid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Member removed
+
+  /orgs/{orgId}/api-keys:
+    post:
+      tags:
+        - API Keys
+      summary: Generate an API Key
+      description: Requires 'admin' role. Generates an API key hashed securely in the database.
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: Production Key
+      responses:
+        '201':
+          description: API key created successfully. Ensure you copy the key as it is only shown once!
+    get:
+      tags:
+        - API Keys
+      summary: List API Keys
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of API keys
+
+  /orgs/{orgId}/api-keys/{keyId}:
+    delete:
+      tags:
+        - API Keys
+      summary: Revoke an API Key
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: keyId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: API Key revoked
+
+  /v1/ping:
+    get:
+      tags:
+        - Rate Limiting
+      summary: Rate Limit Test Route
+      description: >
+        A simple echo endpoint just for testing the rate limiter.
+        Spam this request to verify that the `X-RateLimit-Remaining` header drops to 0 and you receive a `429 Too Many Requests`.
+      security:
+        - apiKeyAuth: []
+      responses:
+        '200':
+          description: Request allowed
+          headers:
+            X-RateLimit-Limit:
+              schema:
+                type: integer
+            X-RateLimit-Remaining:
+              schema:
+                type: integer
+            X-RateLimit-Reset:
+              schema:
+                type: integer
+        '429':
+          description: Too Many Requests
+          headers:
+            X-RateLimit-Limit:
+              schema:
+                type: integer
+            X-RateLimit-Remaining:
+              schema:
+                type: integer
+            X-RateLimit-Reset:
+              schema:
+                type: integer
+
+  /orgs/{orgId}/usage:
+    get:
+      tags:
+        - Usage Metering
+      summary: Get Current Usage
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Usage details
+
+  /orgs/{orgId}/usage/history:
+    get:
+      tags:
+        - Usage Metering
+      summary: Get Usage History
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Historical usage data
+
+  /orgs/{orgId}/billing/checkout:
+    post:
+      tags:
+        - Billing & Stripe
+      summary: Create Checkout Session
+      description: Requires 'owner' role.
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                priceId:
+                  type: string
+                  example: price_xxxxxxxxxxxxxxxx
+      responses:
+        '200':
+          description: Stripe checkout session URL
+
+  /orgs/{orgId}/billing/subscription:
+    get:
+      tags:
+        - Billing & Stripe
+      summary: Get Subscription Details
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Current subscription details
+
+  /orgs/{orgId}/billing/cancel:
+    post:
+      tags:
+        - Billing & Stripe
+      summary: Cancel Subscription
+      description: Requires 'owner' role.
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Subscription cancelled
+
+  /billing/webhook:
+    post:
+      tags:
+        - Billing & Stripe
+      summary: Stripe Webhook (Reference Only)
+      description: >
+        **Reference Only.** This endpoint is exclusively for Stripe.
+        It uses raw body parsing for HMAC verification against the Stripe-Signature header.
+        You cannot test this endpoint via Swagger UI. Use `stripe trigger` in the CLI instead.
+      security: []
+      responses:
+        '200':
+          description: Event processed

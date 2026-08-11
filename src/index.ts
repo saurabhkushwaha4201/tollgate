@@ -18,10 +18,22 @@ import { requestId } from './middlewares/requestId'
 import { requestLogger } from './middlewares/requestLogger'
 dotenv.config()
 
+import swaggerUi from 'swagger-ui-express'
+import YAML from 'yamljs'
+import path from 'path'
+
 const app = express()
+
+// Load Swagger document
+const swaggerDocument = YAML.load(path.join(__dirname, '../swagger.yaml'))
 
 app.use(requestId)
 app.use(requestLogger)
+
+// Serve Swagger UI
+// Serve Swagger UI
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
+
 
 // WEBHOOK ROUTE MUST BE REGISTERED BEFORE express.json()
 // Stripe's signature verification requires the raw request bytes.
