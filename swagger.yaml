@@ -23,53 +23,574 @@ components:
       in: header
       name: x-api-key
       description: Enter your generated API key for rate-limited routes.
-  
+
+  # ── Reusable Parameters ───────────────────────────────────────────────────
+  parameters:
+    OrgId:
+      name: orgId
+      in: path
+      required: true
+      description: UUID of the organization.
+      schema:
+        type: string
+        format: uuid
+      example: "00000000-0000-0000-0000-000000000001"
+
+    Uid:
+      name: uid
+      in: path
+      required: true
+      description: UUID of the target user (member).
+      schema:
+        type: string
+        format: uuid
+      example: "00000000-0000-0000-0000-000000000002"
+
+    KeyId:
+      name: keyId
+      in: path
+      required: true
+      description: UUID of the API key.
+      schema:
+        type: string
+        format: uuid
+      example: "00000000-0000-0000-0000-000000000003"
+
+  # ── Reusable Responses ────────────────────────────────────────────────────
+  responses:
+    Unauthorized:
+      description: Missing or invalid Bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Forbidden:
+      description: Insufficient role, self-modification attempted, or demo account is read-only.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    NotMember:
+      description: Caller is not a member of this organization.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    OrgNotFound:
+      description: Organization not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    ValidationError:
+      description: Request body failed validation — missing or malformed fields.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationError'
+
   schemas:
+    # ── Shared ──────────────────────────────────────────────────────────────
     Error:
       type: object
       properties:
         error:
           type: string
-          example: 'Internal server error'
+          example: 'Forbidden'
+
+    ValidationError:
+      type: object
+      description: >
+        Returned when a Zod schema parse fails. The global error handler
+        converts ZodError to 400 with a structured `details` array.
+      properties:
+        error:
+          type: string
+          example: 'Validation failed'
+        details:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+                example: 'refreshToken'
+              message:
+                type: string
+                example: 'Refresh token is required'
+
+    MessageResponse:
+      type: object
+      properties:
         message:
           type: string
-          example: 'Optional detailed message'
+          example: 'Operation completed successfully'
+
+    # ── Auth ─────────────────────────────────────────────────────────────────
+    TokenPair:
+      type: object
+      properties:
+        accessToken:
+          type: string
+          description: Short-lived JWT (15 minutes). Use as a Bearer token on protected routes.
+          example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
+        refreshToken:
+          type: string
+          description: Long-lived opaque token (7 days). Use to obtain a new access token via POST /auth/refresh.
+          example: 'a1b2c3d4e5f6...'
+
+    OrgMembership:
+      type: object
+      description: An org this user belongs to, embedded in the user profile.
+      properties:
+        org_id:
+          type: string
+          format: uuid
+          example: '00000000-0000-0000-0000-000000000001'
+        org_name:
+          type: string
+          example: 'My Organization'
+        role:
+          type: string
+          enum: [owner, admin, member]
+          example: 'owner'
+
+    UserProfile:
+      type: object
+      description: Current authenticated user with all org memberships.
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: '00000000-0000-0000-0000-000000000002'
+        email:
+          type: string
+          format: email
+          example: 'user@example.com'
+        created_at:
+          type: string
+          format: date-time
+          example: '2025-01-15T10:00:00.000Z'
+        orgs:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrgMembership'
+
+    RegisterResponse:
+      type: object
+      description: >
+        Returned on successful registration — user, org, and initial token pair.
+        Note: `user.created_at` is included here (RETURNING id, email, created_at)
+        but NOT in the login response, which returns only {id, email}.
+      properties:
+        user:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+              example: '00000000-0000-0000-0000-000000000002'
+            email:
+              type: string
+              format: email
+              example: 'user@example.com'
+            created_at:
+              type: string
+              format: date-time
+              example: '2025-01-15T10:00:00.000Z'
+        org:
+          $ref: '#/components/schemas/Org'
+        accessToken:
+          type: string
+          example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
+        refreshToken:
+          type: string
+          example: 'a1b2c3d4e5f6...'
+
+    LoginResponse:
+      type: object
+      description: >
+        Returned on successful login. Note: `user` contains only {id, email} —
+        no `created_at`. This is intentional: loginUser returns the columns it queries
+        (`SELECT id, email, password_hash`), not a full user fetch.
+        Use GET /auth/me to retrieve the complete user profile.
+      properties:
+        user:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+              example: '00000000-0000-0000-0000-000000000002'
+            email:
+              type: string
+              format: email
+              example: 'user@example.com'
+        accessToken:
+          type: string
+          example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
+        refreshToken:
+          type: string
+          example: 'a1b2c3d4e5f6...'
+
+    # ── Orgs ─────────────────────────────────────────────────────────────────
+    Org:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: '00000000-0000-0000-0000-000000000001'
+        name:
+          type: string
+          example: 'My Organization'
+        slug:
+          type: string
+          example: 'my-organization'
+        plan_tier:
+          type: string
+          enum: [free, pro, enterprise]
+          example: 'free'
+        created_at:
+          type: string
+          format: date-time
+          example: '2025-01-15T10:00:00.000Z'
+
+    Member:
+      type: object
+      description: An org member as returned by GET /members.
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The user's ID.
+          example: '00000000-0000-0000-0000-000000000002'
+        email:
+          type: string
+          format: email
+          example: 'user@example.com'
+        role:
+          type: string
+          enum: [owner, admin, member]
+          example: 'admin'
+        joined_at:
+          type: string
+          format: date-time
+          example: '2025-01-15T10:00:00.000Z'
+
+    UpdatedMember:
+      type: object
+      description: >
+        The updated org_members row returned after a successful PATCH.
+        These are the exact 4 columns from the org_members table (RETURNING *).
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          example: '00000000-0000-0000-0000-000000000002'
+        org_id:
+          type: string
+          format: uuid
+          example: '00000000-0000-0000-0000-000000000001'
+        role:
+          type: string
+          enum: [admin, member]
+          example: 'admin'
+        joined_at:
+          type: string
+          format: date-time
+          example: '2025-01-15T10:00:00.000Z'
+
+    # ── API Keys ─────────────────────────────────────────────────────────────
+    ApiKeyCreated:
+      type: object
+      description: >
+        **Show-once response.** The `key` field contains the full plaintext API key.
+        It is returned **only in this response** and is never retrievable again —
+        store it immediately. Subsequent `GET /api-keys` calls return `key_prefix`
+        for identification only, never the full key value.
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: '00000000-0000-0000-0000-000000000003'
+        name:
+          type: string
+          example: 'Production Key'
+        key_prefix:
+          type: string
+          description: First 8 characters of the key for identification purposes.
+          example: 'tg_live_'
+        created_at:
+          type: string
+          format: date-time
+          example: '2025-01-15T10:00:00.000Z'
+        key:
+          type: string
+          description: >
+            Full plaintext API key. Shown ONCE only — never returned again after this response.
+            Copy and store it securely now.
+          example: 'tg_live_a1b2c3d4e5f6g7h8i9j0...'
+
+    ApiKey:
+      type: object
+      description: An API key as returned by the list endpoint. The full key value is never included.
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: '00000000-0000-0000-0000-000000000003'
+        name:
+          type: string
+          example: 'Production Key'
+        key_prefix:
+          type: string
+          description: First characters of the key for identification. Full key is not stored or retrievable.
+          example: 'tg_live_'
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: '2025-01-20T14:30:00.000Z'
+        is_active:
+          type: boolean
+          example: true
+        created_at:
+          type: string
+          format: date-time
+          example: '2025-01-15T10:00:00.000Z'
+
+    # ── Usage Metering ────────────────────────────────────────────────────────
+    UsageSummary:
+      type: object
+      description: >
+        Current billing period usage for an org. Aggregated from hourly rollup summaries
+        (usage_summaries table) — not raw events — for fast reads.
+      properties:
+        data:
+          type: object
+          properties:
+            org_id:
+              type: string
+              format: uuid
+              example: '00000000-0000-0000-0000-000000000001'
+            plan_tier:
+              type: string
+              enum: [free, pro, enterprise]
+              example: 'free'
+            billing_period:
+              type: object
+              properties:
+                start:
+                  type: string
+                  format: date-time
+                  description: Start of the current billing period (anchored to org creation day-of-month).
+                  example: '2025-01-01T00:00:00.000Z'
+                end:
+                  type: string
+                  format: date-time
+                  description: End of the current billing period (one calendar month later).
+                  example: '2025-02-01T00:00:00.000Z'
+            current_usage:
+              type: object
+              properties:
+                request_count:
+                  type: integer
+                  description: Total API requests in the current billing period.
+                  example: 4821
+                throttle_count:
+                  type: integer
+                  description: Requests that were rate-limited (returned 429) in the current billing period.
+                  example: 37
+                limit:
+                  type: integer
+                  description: Per-minute request limit for this org's plan tier.
+                  example: 60
+                window:
+                  type: string
+                  description: The rate-limit window unit.
+                  example: 'per minute'
+            hourly_breakdown:
+              type: array
+              description: Last 24 hours of traffic broken down by hour.
+              items:
+                type: object
+                properties:
+                  hour:
+                    type: string
+                    format: date-time
+                    description: ISO 8601 timestamp for the start of this hour bucket.
+                    example: '2025-01-15T14:00:00.000Z'
+                  requests:
+                    type: integer
+                    example: 312
+                  throttles:
+                    type: integer
+                    example: 5
+
+    UsageHistory:
+      type: object
+      description: >
+        Paginated hourly usage history from usage_summaries.
+        Each row is one hour bucket stored by the aggregation job.
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              period_start:
+                type: string
+                format: date-time
+                description: Start of the hour bucket (truncated to the hour).
+                example: '2025-01-15T14:00:00.000Z'
+              period_end:
+                type: string
+                format: date-time
+                description: End of the hour bucket (period_start + 1 hour).
+                example: '2025-01-15T15:00:00.000Z'
+              request_count:
+                type: integer
+                example: 312
+              throttle_count:
+                type: integer
+                example: 5
+        pagination:
+          type: object
+          properties:
+            page:
+              type: integer
+              example: 1
+            limit:
+              type: integer
+              example: 30
+            total:
+              type: integer
+              description: Total number of hourly buckets for this org.
+              example: 168
+            pages:
+              type: integer
+              description: Total number of pages at the current limit.
+              example: 6
+
+    # ── Billing ───────────────────────────────────────────────────────────────
+    CheckoutSession:
+      type: object
+      description: A Stripe Checkout Session URL. Redirect the user to this URL to complete payment.
+      properties:
+        url:
+          type: string
+          format: uri
+          example: 'https://checkout.stripe.com/c/pay/cs_test_...'
+
+    Subscription:
+      type: object
+      description: >
+        Current subscription state. `subscription` is `null` for free-tier orgs
+        (no Stripe subscription exists). For paid orgs, live data is fetched
+        directly from Stripe — not from a local cache.
+      properties:
+        plan_tier:
+          type: string
+          enum: [free, pro, enterprise]
+          example: 'pro'
+        payment_status:
+          type: string
+          enum: [active, past_due, canceled]
+          description: >
+            Webhook-driven field. `past_due` means payment failed but the org
+            is still in grace period. `canceled` means the subscription.deleted
+            webhook has fired and access has been revoked.
+          example: 'active'
+        subscription:
+          nullable: true
+          description: Null for free-tier orgs. For paid orgs, live from Stripe.
+          type: object
+          properties:
+            id:
+              type: string
+              description: Stripe subscription ID.
+              example: 'sub_1ABC...'
+            status:
+              type: string
+              description: Stripe-native subscription status.
+              example: 'active'
+            current_period_start:
+              type: string
+              format: date-time
+              nullable: true
+              example: '2025-01-01T00:00:00.000Z'
+            current_period_end:
+              type: string
+              format: date-time
+              nullable: true
+              example: '2025-02-01T00:00:00.000Z'
+            cancel_at_period_end:
+              type: boolean
+              description: True if the org has cancelled and will lose access at current_period_end.
+              example: false
 
 security:
   - bearerAuth: []
 
 tags:
   - name: Health Check
+    description: Liveness probe — verifies Postgres and Redis connectivity in one request.
   - name: Auth
+    description: JWT-based authentication with refresh-token rotation and theft detection.
   - name: Organizations & Members
+    description: Multi-tenant org management — RBAC-guarded member invites, role updates, and removals.
   - name: API Keys
+    description: Hashed API key issuance and revocation. The full key is returned show-once on creation.
   - name: Rate Limiting
+    description: Redis-backed per-org rate limiting. Use /v1/ping to exercise the limiter live.
   - name: Usage Metering
+    description: Hourly rollup usage data — current period totals, 24h breakdown, and paginated history.
   - name: Billing & Stripe
+    description: Stripe Checkout, live subscription reads, and webhook-driven plan lifecycle management.
 
 paths:
   /health:
     get:
+      operationId: healthCheck
       tags:
         - Health Check
       summary: System Health Check
-      description: Zero-friction "does the whole stack breathe" check. Verifies Postgres and Redis connectivity.
+      description: >
+        Zero-friction "does the whole stack breathe" check.
+        Verifies Postgres and Redis connectivity. Returns 500 if either dependency is unreachable.
       security: []
       responses:
         '200':
-          description: Systems operational
+          description: Systems operational.
           content:
             application/json:
               example:
                 status: 'ok'
                 postgres: 'connected'
                 redis: 'connected'
+        '500':
+          description: One or more dependencies unreachable.
+          content:
+            application/json:
+              example:
+                status: 'error'
+                error: 'connect ECONNREFUSED'
 
   /auth/register:
     post:
+      operationId: register
       tags:
         - Auth
       summary: Register a new user and organization
+      description: >
+        Creates a new user account, a new organization, and makes the user the owner of that org —
+        all within a single database transaction. Returns the user object, org object, and an initial
+        token pair (access + refresh).
       security: []
       requestBody:
         required: true
@@ -77,9 +598,11 @@ paths:
           application/json:
             schema:
               type: object
+              required: [email, password, orgName]
               properties:
                 email:
                   type: string
+                  format: email
                   example: your_email@example.com
                 password:
                   type: string
@@ -89,18 +612,31 @@ paths:
                   example: My Organization
       responses:
         '201':
-          description: Registration successful, returns tokens and org details.
+          description: Registration successful — returns user, org, and initial token pair.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterResponse'
         '400':
-          description: Validation error
+          $ref: '#/components/responses/ValidationError'
         '409':
-          description: Email or Org Name already in use
+          description: Email already registered, or org name already taken.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /auth/login:
     post:
+      operationId: login
       tags:
         - Auth
       summary: User Login
-      description: Authenticate and receive a 15-minute JWT and a 7-day refresh token.
+      description: >
+        Authenticate and receive a 15-minute JWT access token and a 7-day refresh token.
+        Rate-limited to prevent brute-force attacks (Redis-backed, per-IP).
+        A timing-safe dummy bcrypt compare is performed even when the email is not found,
+        preventing user enumeration.
       security: []
       requestBody:
         required: true
@@ -108,30 +644,63 @@ paths:
           application/json:
             schema:
               type: object
+              required: [email, password]
               properties:
                 email:
                   type: string
+                  format: email
                   example: your_email@example.com
                 password:
                   type: string
                   example: StrongPassword123!
       responses:
         '200':
-          description: Login successful
+          description: Login successful — returns user and token pair.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
         '401':
-          description: Invalid credentials
+          description: Invalid credentials.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '429':
-          description: Too many login attempts
+          description: Too many login attempts — back off and retry after the indicated reset time.
+          headers:
+            X-RateLimit-Limit:
+              description: Maximum login attempts allowed in the window.
+              schema:
+                type: integer
+            X-RateLimit-Remaining:
+              description: Remaining attempts in the current window.
+              schema:
+                type: integer
+            X-RateLimit-Reset:
+              description: Unix timestamp (seconds) when the window resets.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /auth/refresh:
     post:
+      operationId: refreshToken
       tags:
         - Auth
       summary: Refresh Access Token
       description: >
-        Exercises the refresh-token rotation (15-min JWT + hashed 7-day refresh token).
-        Submitting a valid refresh token returns a new access token AND a newly rotated refresh token.
-        Reusing an already-used refresh token will trigger theft-detection and revoke all sessions for the user.
+        Exercises refresh-token rotation — submitting a valid refresh token returns a new
+        access token AND a newly rotated refresh token (the old one is invalidated).
+
+        **Authentication:** No Bearer token required. The `refreshToken` body field itself
+        is the credential — it is hashed and looked up in the database.
+
+        **Theft detection:** Reusing an already-consumed refresh token (replay attack)
+        immediately revokes ALL sessions for the affected user.
       security: []
       requestBody:
         required: true
@@ -139,22 +708,39 @@ paths:
           application/json:
             schema:
               type: object
+              required: [refreshToken]
               properties:
                 refreshToken:
                   type: string
                   example: "your_refresh_token_here"
       responses:
         '200':
-          description: Refresh successful
+          description: Refresh successful — returns a new access token and a newly rotated refresh token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPair'
+        '400':
+          $ref: '#/components/responses/ValidationError'
         '401':
-          description: Invalid or expired refresh token
+          description: Invalid or expired refresh token. If the token was already used, all sessions for this user have been revoked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /auth/logout:
     post:
+      operationId: logout
       tags:
         - Auth
       summary: User Logout
-      description: Logs the user out by deleting their refresh token from the database. No Bearer auth required. The refresh token itself acts as proof of session, allowing clients with expired access tokens to cleanly log out.
+      description: >
+        Logs the user out by deleting their refresh token from the database.
+
+        **Authentication:** No Bearer token required. The `refreshToken` body field itself
+        acts as proof of session — this allows clients with an already-expired access token
+        to still cleanly log out without needing to refresh first.
       security: []
       requestBody:
         required: true
@@ -162,218 +748,368 @@ paths:
           application/json:
             schema:
               type: object
+              required: [refreshToken]
               properties:
                 refreshToken:
                   type: string
                   example: "your_refresh_token_here"
       responses:
         '200':
-          description: Logged out successfully
+          description: Logged out successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: 'Logged out successfully'
+        '400':
+          description: >
+            `refreshToken` field is missing or empty. The global Zod error handler
+            converts the parse failure to a structured 400.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
 
   /auth/me:
     get:
+      operationId: getMe
       tags:
         - Auth
       summary: Get Current User Profile
+      description: Returns the authenticated user's profile and all org memberships with roles.
       responses:
         '200':
-          description: User profile and associated orgs
+          description: User profile with all org memberships.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /orgs/{orgId}:
     get:
+      operationId: getOrg
       tags:
         - Organizations & Members
       summary: Get Organization Details
+      description: Returns org metadata. Requires at least `member` role in the org.
       parameters:
-        - name: orgId
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: '#/components/parameters/OrgId'
       responses:
         '200':
-          description: Organization details
+          description: Organization details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Org'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/NotMember'
+        '404':
+          $ref: '#/components/responses/OrgNotFound'
 
   /orgs/{orgId}/members:
     get:
+      operationId: listMembers
       tags:
         - Organizations & Members
       summary: List Organization Members
+      description: Returns all members of the org with their roles. Requires at least `member` role.
       parameters:
-        - name: orgId
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: '#/components/parameters/OrgId'
       responses:
         '200':
-          description: List of members
+          description: Array of org members ordered by join date ascending.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Member'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/NotMember'
 
   /orgs/{orgId}/members/invite:
     post:
+      operationId: inviteMember
       tags:
         - Organizations & Members
       summary: Invite a User to Organization
-      description: Requires 'admin' role.
+      description: >
+        Adds an existing Tollgate user to the org with the specified role.
+        Requires `admin` role or above.
+
+        **Note:** The response only returns a confirmation message — it does not include
+        the new member's user ID. Call `GET /orgs/{orgId}/members` after this request
+        to retrieve the member's ID for subsequent PATCH or DELETE operations.
       parameters:
-        - name: orgId
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: '#/components/parameters/OrgId'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              required: [email, role]
               properties:
                 email:
                   type: string
+                  format: email
                   example: newuser@example.com
                 role:
                   type: string
                   enum: [admin, member]
       responses:
         '201':
-          description: User invited
+          description: User invited and added to org.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: 'newuser@example.com added as member'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No registered user found with that email address.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: The user is already a member of this org.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /orgs/{orgId}/members/{uid}:
     patch:
+      operationId: updateMemberRole
       tags:
         - Organizations & Members
       summary: Update Member Role
       description: >
-        Exercises RBAC logic (owner promoting/demoting a member).
-        Only accessible by org owners. Prevents self-modification and prevents assigning/changing the 'owner' role.
+        Updates a member's role within the org. Requires `owner` role.
+
+        **Two additional guards apply at the service layer:**
+        - Owners cannot modify their own role (self-modification is blocked).
+        - Owners cannot demote another member who already holds the `owner` role —
+          ownership transfer is a separate operation, not achievable via this endpoint.
+
+        Valid target roles are `admin` and `member`. The `owner` role cannot be assigned here.
       parameters:
-        - name: orgId
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: uid
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: '#/components/parameters/OrgId'
+        - $ref: '#/components/parameters/Uid'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              required: [role]
               properties:
                 role:
                   type: string
                   enum: [admin, member]
       responses:
         '200':
-          description: Role updated
+          description: Role updated — returns the updated org_members row.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdatedMember'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >
+            Insufficient role (requires owner), self-modification attempted,
+            target member holds the owner role (cannot be demoted here), or demo account is read-only.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Target member not found in this org.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
     delete:
+      operationId: removeMember
       tags:
         - Organizations & Members
       summary: Remove Member from Organization
-      description: Requires 'admin' role. Owners cannot be removed.
+      description: >
+        Removes a member from the org. Requires `admin` role or above.
+        The org owner cannot be removed — ownership must be transferred first.
       parameters:
-        - name: orgId
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: uid
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: '#/components/parameters/OrgId'
+        - $ref: '#/components/parameters/Uid'
       responses:
         '200':
-          description: Member removed
+          description: Member removed successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: 'Member removed'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Insufficient role (requires admin or above), target is the org owner, or demo account is read-only.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Target member not found in this org.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /orgs/{orgId}/api-keys:
     post:
+      operationId: createApiKey
       tags:
         - API Keys
       summary: Generate an API Key
-      description: Requires 'admin' role. Generates an API key hashed securely in the database.
+      description: >
+        Generates a new API key for the org. Requires `admin` role or above.
+
+        The key is hashed with SHA-256 before storage — only the hash ever touches the database.
+        **The full plaintext key is returned only in this response and is never retrievable again.**
+        Store it immediately.
       parameters:
-        - name: orgId
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: '#/components/parameters/OrgId'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              required: [name]
               properties:
                 name:
                   type: string
                   example: Production Key
       responses:
         '201':
-          description: API key created successfully. Ensure you copy the key as it is only shown once!
+          description: >
+            API key created. **Copy the `key` value now — it will never be shown again.**
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyCreated'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     get:
+      operationId: listApiKeys
       tags:
         - API Keys
       summary: List API Keys
+      description: >
+        Returns all API keys for the org. The full key value is never included —
+        only the `key_prefix` (first characters) is returned for identification.
       parameters:
-        - name: orgId
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: '#/components/parameters/OrgId'
       responses:
         '200':
-          description: List of API keys
+          description: Array of API key records (safe fields only — no key hash or plaintext).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApiKey'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/NotMember'
 
   /orgs/{orgId}/api-keys/{keyId}:
     delete:
+      operationId: revokeApiKey
       tags:
         - API Keys
       summary: Revoke an API Key
+      description: >
+        Soft-deletes the key by setting `is_active = false`. Revoked keys are immediately
+        rejected by the `authenticateApiKey` middleware. Requires `admin` role or above.
       parameters:
-        - name: orgId
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: keyId
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: '#/components/parameters/OrgId'
+        - $ref: '#/components/parameters/KeyId'
       responses:
         '200':
-          description: API Key revoked
+          description: API key revoked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: API key not found in this org.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /v1/ping:
     get:
+      operationId: rateLimitPing
       tags:
         - Rate Limiting
       summary: Rate Limit Test Route
       description: >
-        A simple echo endpoint just for testing the rate limiter.
-        Spam this request to verify that the `X-RateLimit-Remaining` header drops to 0 and you receive a `429 Too Many Requests`.
+        A simple echo endpoint for exercising the per-org, per-minute rate limiter.
+        Requires an `x-api-key` header. Spam this request to watch `X-RateLimit-Remaining`
+        drop to 0 and trigger a `429 Too Many Requests`. The limit resets at `X-RateLimit-Reset`.
       security:
         - apiKeyAuth: []
       responses:
         '200':
-          description: Request allowed
+          description: Request allowed — rate-limit headers reflect current window state.
           headers:
             X-RateLimit-Limit:
+              description: Maximum requests allowed per minute for this org's plan tier.
               schema:
                 type: integer
             X-RateLimit-Remaining:
+              description: Requests remaining in the current 1-minute window.
               schema:
                 type: integer
             X-RateLimit-Reset:
+              description: Unix timestamp (seconds) when the rate-limit window resets.
               schema:
                 type: integer
+          content:
+            application/json:
+              example:
+                message: pong
+        '401':
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '429':
-          description: Too Many Requests
+          description: Too Many Requests — rate limit exceeded. Retry after the indicated reset time.
           headers:
             X-RateLimit-Limit:
               schema:
@@ -384,104 +1120,229 @@ paths:
             X-RateLimit-Reset:
               schema:
                 type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /orgs/{orgId}/usage:
     get:
+      operationId: getUsage
       tags:
         - Usage Metering
       summary: Get Current Usage
+      description: >
+        Returns current billing-period usage aggregated from hourly rollup summaries.
+        Reads from `usage_summaries` (pre-aggregated), not raw `usage_events` — fast
+        regardless of request volume. Also includes a 24-hour hourly breakdown.
       parameters:
-        - name: orgId
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: '#/components/parameters/OrgId'
       responses:
         '200':
-          description: Usage details
+          description: Current period usage with hourly breakdown.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsageSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/NotMember'
+        '404':
+          $ref: '#/components/responses/OrgNotFound'
 
   /orgs/{orgId}/usage/history:
     get:
+      operationId: getUsageHistory
       tags:
         - Usage Metering
       summary: Get Usage History
+      description: >
+        Returns paginated hourly usage buckets from `usage_summaries`.
+        Supports `page` and `limit` query parameters (defaults: page=1, limit=30, max limit=100).
       parameters:
-        - name: orgId
-          in: path
-          required: true
+        - $ref: '#/components/parameters/OrgId'
+        - name: page
+          in: query
           schema:
-            type: string
+            type: integer
+            default: 1
+          example: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 30
+            maximum: 100
+          example: 30
       responses:
         '200':
-          description: Historical usage data
+          description: Paginated historical usage data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsageHistory'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/NotMember'
 
   /orgs/{orgId}/billing/checkout:
     post:
+      operationId: createCheckoutSession
       tags:
         - Billing & Stripe
       summary: Create Checkout Session
-      description: Requires 'owner' role.
+      description: >
+        Creates a Stripe Checkout Session for upgrading to a paid plan. Requires `owner` role.
+
+        On the first checkout, a Stripe Customer is created and `stripe_customer_id` is stored
+        on the org. The `org_id` is stored in three metadata locations (session, subscription,
+        customer) to ensure webhook events from any Stripe object can be traced back to the org.
+
+        Valid `priceId` values correspond to your Stripe dashboard price IDs for the `pro`
+        and `enterprise` plans.
       parameters:
-        - name: orgId
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: '#/components/parameters/OrgId'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              required: [priceId]
               properties:
                 priceId:
                   type: string
+                  description: Stripe Price ID for the target plan (from your Stripe dashboard).
                   example: price_xxxxxxxxxxxxxxxx
       responses:
         '200':
-          description: Stripe checkout session URL
+          description: Checkout session created — redirect the user to the returned URL.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckoutSession'
+        '400':
+          description: Invalid or unrecognised plan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrgNotFound'
 
   /orgs/{orgId}/billing/subscription:
     get:
+      operationId: getSubscription
       tags:
         - Billing & Stripe
       summary: Get Subscription Details
+      description: >
+        Returns the org's current plan and live subscription data fetched directly from Stripe
+        (not cached). For free-tier orgs with no Stripe subscription, `subscription` is `null`.
+
+        The `payment_status` field is webhook-driven — it reflects the last event received from
+        Stripe (`active`, `past_due`, or `canceled`).
       parameters:
-        - name: orgId
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: '#/components/parameters/OrgId'
       responses:
         '200':
-          description: Current subscription details
+          description: Current subscription state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/NotMember'
+        '404':
+          $ref: '#/components/responses/OrgNotFound'
 
   /orgs/{orgId}/billing/cancel:
     post:
+      operationId: cancelSubscription
       tags:
         - Billing & Stripe
       summary: Cancel Subscription
-      description: Requires 'owner' role.
+      description: >
+        Schedules subscription cancellation at the end of the current billing period
+        (`cancel_at_period_end: true`). The org retains access until then.
+
+        This endpoint does **not** update `plan_tier` or `payment_status` locally —
+        those fields are updated by the `customer.subscription.deleted` webhook,
+        which is the authoritative source of truth.
+
+        Requires `owner` role.
       parameters:
-        - name: orgId
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: '#/components/parameters/OrgId'
       responses:
         '200':
-          description: Subscription cancelled
+          description: Cancellation scheduled — org retains access until period end.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: 'Subscription will cancel at end of billing period'
+        '400':
+          description: No active subscription found for this org.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /billing/webhook:
     post:
+      operationId: stripeWebhook
       tags:
         - Billing & Stripe
       summary: Stripe Webhook (Reference Only)
       description: >
-        **Reference Only.** This endpoint is exclusively for Stripe.
-        It uses raw body parsing for HMAC verification against the Stripe-Signature header.
-        You cannot test this endpoint via Swagger UI. Use `stripe trigger` in the CLI instead.
+        **Reference Only.** This endpoint is exclusively for Stripe's webhook delivery.
+
+        Raw body parsing is required for HMAC-SHA256 signature verification against the
+        `Stripe-Signature` header. The `stripe_event_id` unique constraint in the
+        `billing_events` table provides idempotency — duplicate webhook deliveries
+        (Stripe delivers at-least-once) hit a unique violation and are silently ignored.
+
+        You cannot test this endpoint via Swagger UI. Use `stripe trigger <event>` in the
+        Stripe CLI instead.
       security: []
       responses:
         '200':
-          description: Event processed
+          description: Event received and processed (or duplicate silently ignored).
+          content:
+            application/json:
+              example:
+                received: true
+        '400':
+          description: >
+            Missing `Stripe-Signature` header, failed HMAC-SHA256 signature verification,
+            or webhook handler error. Stripe will retry on any non-200 response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                missing_signature:
+                  summary: Missing header
+                  value:
+                    error: 'Missing stripe-signature header'
+                invalid_signature:
+                  summary: HMAC verification failed
+                  value:
+                    error: 'Invalid webhook signature'
+                processing_error:
+                  summary: Handler error
+                  value:
+                    error: 'Webhook processing failed'
