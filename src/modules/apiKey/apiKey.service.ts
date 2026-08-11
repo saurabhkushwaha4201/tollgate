@@ -52,9 +52,10 @@ export async function lookupApiKey(rawKey: string) {
   const hash = hashApiKey(rawKey);
 
   const result = await db.query(
-    `SELECT id, org_id, is_active
-     FROM api_keys
-     WHERE key_hash = $1`,
+    `SELECT ak.id, ak.org_id, ak.is_active, o.slug as org_slug
+     FROM api_keys ak
+     JOIN orgs o ON o.id = ak.org_id
+     WHERE ak.key_hash = $1`,
     [hash]
   );
 

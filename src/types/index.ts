@@ -35,6 +35,7 @@ export interface AuthenticatedRequest extends Request {
     email: string
   };
   org_id?: string;
+  org_slug?: string;     // useful for intercepting requests for specific orgs
   api_key_id?: string;   // set by authenticateApiKey — used for usage_events FK
   requestId?: string;
 }

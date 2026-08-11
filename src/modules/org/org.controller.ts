@@ -37,8 +37,9 @@ export const inviteMember = async (req: Request, res: Response, next: NextFuncti
 export const updateMemberRole = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const { role } = updateRoleSchema.parse(req.body)
+        const requestingUserId = (req as any).user.userId
         const result = await orgService.updateMemberRoleInOrg(
-            req.params.orgId as string, req.params.uid as string, role
+            req.params.orgId as string, req.params.uid as string, role, requestingUserId
         )
         res.json(result)
     } catch (err) { next(err) }

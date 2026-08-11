@@ -21,6 +21,7 @@ export async function authenticateApiKey(req: AuthenticatedRequest, res: Respons
 
   // Attach org context — downstream handlers/middleware use this
   req.org_id = apiKey.org_id;
+  req.org_slug = apiKey.org_slug;
   req.api_key_id = apiKey.id;   // used by usage metering in rateLimit middleware
 
   // Fire and forget — no await, no latency added

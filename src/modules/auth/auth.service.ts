@@ -98,6 +98,8 @@ export const loginUser = async (input: LoginInput) => {
   const user = result.rows[0]
 
   if (!user) {
+    // Run a dummy compare to thwart timing attacks (user enumeration)
+    await comparePassword('dummy', '$2a$10$12345678901234567890123456789012345678901234567890123');
     throw new AppError('Invalid credentials', 401)
   }
 
@@ -119,24 +121,62 @@ export const loginUser = async (input: LoginInput) => {
 
 export const refreshAccessToken = async (rawRefreshToken: string) => {
   const tokenHash = hashRefreshToken(rawRefreshToken)
+  const client = await db.connect()
 
-  // Find token in DB
-  const result = await db.query(
-    `SELECT rt.*, u.email FROM refresh_tokens rt
-     JOIN users u ON u.id = rt.user_id
-     WHERE rt.token_hash = $1 AND rt.expires_at > NOW()`,
-    [tokenHash]
-  )
+  try {
+    await client.query('BEGIN')
 
-  if (result.rows.length === 0) {
-    throw new AppError('Invalid or expired refresh token', 401)
+    // Find token in DB and lock the row
+    const result = await client.query(
+      `SELECT rt.*, u.email FROM refresh_tokens rt
+       JOIN users u ON u.id = rt.user_id
+       WHERE rt.token_hash = $1 AND rt.expires_at > NOW()
+       FOR UPDATE`,
+      [tokenHash]
+    )
+
+    if (result.rows.length === 0) {
+      throw new AppError('Invalid or expired refresh token', 401)
+    }
+
+    const { user_id, email, is_revoked } = result.rows[0]
+
+    // Reuse detection
+    if (is_revoked) {
+      // Token was already used/rotated. This is a theft indicator!
+      // Revoke ALL refresh tokens for this user immediately
+      await client.query(`DELETE FROM refresh_tokens WHERE user_id = $1`, [user_id])
+      throw new AppError('Invalid or expired refresh token', 401) // Keep it generic
+    }
+
+    // Mark current token as revoked
+    await client.query(
+      `UPDATE refresh_tokens SET is_revoked = true WHERE token_hash = $1`,
+      [tokenHash]
+    )
+
+    // Issue new access and refresh tokens
+    const accessToken = generateAccessToken({ userId: user_id, email })
+    const newRefreshToken = generateRefreshToken()
+    
+    // Save new refresh token in the same transaction
+    const newTokenHash = hashRefreshToken(newRefreshToken)
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+    await client.query(
+      `INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
+       VALUES ($1, $2, $3)`,
+      [user_id, newTokenHash, expiresAt]
+    )
+
+    await client.query('COMMIT')
+    
+    return { accessToken, refreshToken: newRefreshToken }
+  } catch (err) {
+    await client.query('ROLLBACK')
+    throw err
+  } finally {
+    client.release()
   }
-
-  const { user_id, email } = result.rows[0]
-
-  // Issue new access token
-  const accessToken = generateAccessToken({ userId: user_id, email })
-  return { accessToken }
 }
 
 export const logoutUser = async (rawRefreshToken: string) => {

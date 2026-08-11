@@ -54,21 +54,48 @@ export const inviteUserToOrg = async (orgId: string, email: string, role: Role) 
 export const updateMemberRoleInOrg = async (
   orgId: string,
   targetUserId: string,
-  newRole: Role
+  newRole: Role,
+  requestingUserId: string
 ) => {
-  // Prevent owner role assignment 
+  if (targetUserId === requestingUserId) {
+    throw new AppError('Cannot modify your own role', 403)
+  }
+
   if (newRole === 'owner') {
     throw new AppError('Cannot assign owner role via this endpoint', 403)
   }
 
-  const result = await db.query(
-    `UPDATE org_members SET role = $1
-     WHERE org_id = $2 AND user_id = $3
-     RETURNING *`,
-    [newRole, orgId, targetUserId]
-  )
-  if (result.rows.length === 0) throw new AppError('Member not found', 404)
-  return result.rows[0]
+  const client = await db.connect()
+
+  try {
+    await client.query('BEGIN')
+
+    const check = await client.query(
+      `SELECT role FROM org_members WHERE user_id = $1 AND org_id = $2 FOR UPDATE`,
+      [targetUserId, orgId]
+    )
+    if (check.rows.length === 0) {
+      throw new AppError('Member not found', 404)
+    }
+    if (check.rows[0].role === 'owner') {
+      throw new AppError('Owner role can only be changed via transfer', 403)
+    }
+
+    const result = await client.query(
+      `UPDATE org_members SET role = $1
+       WHERE org_id = $2 AND user_id = $3
+       RETURNING *`,
+      [newRole, orgId, targetUserId]
+    )
+
+    await client.query('COMMIT')
+    return result.rows[0]
+  } catch (err) {
+    await client.query('ROLLBACK')
+    throw err
+  } finally {
+    client.release()
+  }
 }
 
 export const removeMemberFromOrg = async (orgId: string, targetUserId: string) => {

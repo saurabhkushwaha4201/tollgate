@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
   user_id UUID REFERENCES users(id) ON DELETE CASCADE,
   token_hash TEXT UNIQUE NOT NULL,
   expires_at TIMESTAMPTZ NOT NULL,
+  is_revoked BOOLEAN DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

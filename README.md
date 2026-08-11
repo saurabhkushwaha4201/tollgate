@@ -27,11 +27,13 @@ curl -X GET https://tollgate-api.onrender.com/health
 ```
 
 **2. Authenticate (Demo Account)**
-You can generate a live JWT access token using these read-only demo credentials:
+You can generate a live JWT access token using these demo credentials:
 - **Email:** `demo@tollgate.io`
 - **Password:** `Demo1234!`
 
-*(Note: Make sure to actually register this demo account in your live database!)*
+*(Note: For security and demonstration purposes, this account is sandboxed to read-only access. Mutating actions like creating API keys, inviting members, or billing checkouts will return a 403 Forbidden. Data shown reflects a fixed demo dataset.)*
+
+
 
 ## 💻 Tech Stack
 
@@ -39,7 +41,7 @@ You can generate a live JWT access token using these read-only demo credentials:
 | :--- | :--- | :--- |
 | **Runtime** | Node.js 20 + TypeScript | API server, background aggregation job, webhook handler |
 | **Web Framework**| Express 5 | Lightweight routing and middleware management. |
-| **Database** | PostgreSQL 16 | Org/user/billing state, usage_events, usage_summaries |
+| **Database** | PostgreSQL 16+ | Org/user/billing state, usage_events, usage_summaries |
 | **Cache & State**| Redis 7 | Sliding window rate limit buckets per org (sorted sets) |
 | **Billing** | Stripe | Checkout sessions, subscription lifecycle, webhook events |
 | **Infrastructure**| Render, Neon, Upstash, Docker | Cloud serverless deployment & Local container orchestration |
