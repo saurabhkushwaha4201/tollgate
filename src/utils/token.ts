@@ -23,10 +23,15 @@ const JWT_EXPIRES_IN = '15m'
 interface TokenPayload {
   userId: string
   email: string
+  jti?: string
+  exp?: number
 }
 
-export const generateAccessToken = (payload: TokenPayload): string => {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN })
+export const generateAccessToken = (payload: Omit<TokenPayload, 'jti' | 'exp'>): string => {
+  return jwt.sign(payload, JWT_SECRET, { 
+    expiresIn: JWT_EXPIRES_IN,
+    jwtid: crypto.randomUUID()
+  })
 }
 
 export const verifyAccessToken = (token: string): TokenPayload => {

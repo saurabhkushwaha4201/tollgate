@@ -1,5 +1,7 @@
 // Authentication logic
+import jwt from 'jsonwebtoken'
 import { db } from '../../config/db'
+import { redis } from '../../config/redis'
 import { hashPassword, comparePassword } from '../../utils/hash'
 import { generateAccessToken, generateRefreshToken, hashRefreshToken } from '../../utils/token'
 import { generateSlug } from '../../utils/slug'
@@ -179,13 +181,33 @@ export const refreshAccessToken = async (rawRefreshToken: string) => {
   }
 }
 
-export const logoutUser = async (rawRefreshToken: string) => {
+export const logoutUser = async (rawRefreshToken: string, accessToken?: string) => {
   const tokenHash = hashRefreshToken(rawRefreshToken)
 
   await db.query(
     `DELETE FROM refresh_tokens WHERE token_hash = $1`,
     [tokenHash]
   )
+
+  // If access token is provided, blacklist it
+  if (accessToken) {
+    try {
+      // Decode without verifying signature since it might be expired and we only want the jti
+      const decoded = jwt.decode(accessToken) as { jti?: string, exp?: number } | null
+      
+      if (decoded && decoded.jti && decoded.exp) {
+        const now = Math.floor(Date.now() / 1000)
+        const ttl = decoded.exp - now
+        
+        if (ttl > 0) {
+          // Add to Redis blacklist with TTL equal to the token's remaining lifespan
+          await redis.set(`blacklist:${decoded.jti}`, '1', 'EX', ttl)
+        }
+      }
+    } catch (err) {
+      // Ignore errors decoding the access token on logout
+    }
+  }
 }
 
 // For user details

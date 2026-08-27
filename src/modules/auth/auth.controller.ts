@@ -35,7 +35,15 @@ export const refresh = async (req: Request, res: Response, next: NextFunction) =
 export const logout = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { refreshToken } = refreshTokenSchema.parse(req.body)
-    await logoutUser(refreshToken)
+    
+    // Extract access token if provided
+    let accessToken: string | undefined;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      accessToken = authHeader.split(' ')[1];
+    }
+
+    await logoutUser(refreshToken, accessToken)
     res.json({ message: 'Logged out successfully' })
   } catch (err) {
     next(err)
