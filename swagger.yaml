@@ -713,6 +713,11 @@ paths:
               description: Unix timestamp (seconds) when the window resets.
               schema:
                 type: integer
+            Retry-After:
+              description: Seconds until the rate-limit window resets.
+              schema:
+                type: integer
+              example: 47
           content:
             application/json:
               schema:

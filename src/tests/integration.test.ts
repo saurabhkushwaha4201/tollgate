@@ -144,12 +144,9 @@ describe('Full org lifecycle', () => {
 
       const webhookRes = await request(app)
         .post('/billing/webhook')
-        .set('Content-Type', 'application/octet-stream')
+        .set('Content-Type', 'application/json')
         .set('stripe-signature', signature)
-        .send(Buffer.from(rawBody));
-
-      // Restore the original secret before any assertions that might throw
-      process.env.STRIPE_WEBHOOK_SECRET = originalSecret;
+        .send(rawBody);
 
       expect(webhookRes.status).toBe(200);
       expect(webhookRes.body.received).toBe(true);
@@ -164,9 +161,12 @@ describe('Full org lifecycle', () => {
       // ── 7. Verify idempotency — sending the same event again is a no-op ─
       const duplicateRes = await request(app)
         .post('/billing/webhook')
-        .set('Content-Type', 'application/octet-stream')
+        .set('Content-Type', 'application/json')
         .set('stripe-signature', signature)
-        .send(Buffer.from(rawBody));
+        .send(rawBody);
+
+      // Restore the original secret
+      process.env.STRIPE_WEBHOOK_SECRET = originalSecret;
 
       // 200 because we silently drop duplicates (unique constraint on stripe_event_id)
       expect(duplicateRes.status).toBe(200);
