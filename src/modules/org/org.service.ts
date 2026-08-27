@@ -11,16 +11,62 @@ export const getOrgById = async (orgId: string) => {
   return result.rows[0]
 }
 
-export const listOrgMembers = async (orgId: string) => {
-  const result = await db.query(
-    `SELECT u.id, u.email, om.role, om.joined_at
-     FROM org_members om
-     JOIN users u ON u.id = om.user_id
-     WHERE om.org_id = $1
-     ORDER BY om.joined_at ASC`,
-    [orgId]
-  )
-  return result.rows
+export interface OrgMember {
+  id: string;
+  email: string;
+  role: string;
+  joined_at: string;
+}
+
+export interface MembersPage {
+  members: OrgMember[];
+  nextCursor: string | null;
+}
+
+export const listOrgMembers = async (
+  orgId: string,
+  limit: number = 20,
+  cursor?: string          // ISO timestamp of joined_at — exclusive lower bound
+): Promise<MembersPage> => {
+  let rows: OrgMember[];
+
+  if (cursor) {
+    // Cursor-based: fetch rows strictly after the cursor timestamp.
+    // WHERE joined_at > cursor keeps the scan O(k) regardless of how deep the page is —
+    // unlike OFFSET which forces the DB to read and discard all preceding rows first.
+    const result = await db.query<OrgMember>(
+      `SELECT u.id, u.email, om.role, om.joined_at
+       FROM org_members om
+       JOIN users u ON u.id = om.user_id
+       WHERE om.org_id = $1
+         AND om.joined_at > $2
+       ORDER BY om.joined_at ASC
+       LIMIT $3`,
+      [orgId, cursor, limit + 1]   // fetch one extra to detect if a next page exists
+    );
+    rows = result.rows;
+  } else {
+    // First page — no cursor supplied
+    const result = await db.query<OrgMember>(
+      `SELECT u.id, u.email, om.role, om.joined_at
+       FROM org_members om
+       JOIN users u ON u.id = om.user_id
+       WHERE om.org_id = $1
+       ORDER BY om.joined_at ASC
+       LIMIT $2`,
+      [orgId, limit + 1]           // fetch one extra to detect if a next page exists
+    );
+    rows = result.rows;
+  }
+
+  // If we got limit+1 rows, there is a next page. Trim the extra row and
+  // return the joined_at of the last *included* row as the next cursor.
+  const hasMore = rows.length > limit;
+  if (hasMore) rows = rows.slice(0, limit);
+
+  const nextCursor = hasMore ? rows[rows.length - 1].joined_at : null;
+
+  return { members: rows, nextCursor };
 }
 
 export const inviteUserToOrg = async (orgId: string, email: string, role: Role) => {

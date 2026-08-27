@@ -2,6 +2,8 @@
 
 > **API infrastructure for multi-tenant SaaS — authentication, rate limiting, usage metering, and Stripe billing in one unified backend.**
 
+[![CI](https://github.com/saurabhkushwaha4201/tollgate/actions/workflows/ci.yml/badge.svg)](https://github.com/saurabhkushwaha4201/tollgate/actions/workflows/ci.yml)
+
 ---
 
 ## 📖 What it is
@@ -161,7 +163,7 @@ Full interactive documentation at [`/api-docs`](https://tollgate-api.onrender.co
 |---|---|---|---|
 | `GET` | `/v1/ping` | `x-api-key` header | Rate limit test route |
 | `GET` | `/orgs/:orgId/usage` | Bearer JWT | Current billing period |
-| `GET` | `/orgs/:orgId/usage/history` | Bearer JWT | Paginated hourly history |
+| `GET` | `/orgs/:orgId/usage/history` | Bearer JWT | Paginated hourly history. Query params: `page` (default 1), `limit` (default 30, max 100) |
 
 ### Billing & Stripe
 
@@ -241,3 +243,4 @@ The architectural trade-offs that make this system robust — token rotation str
 - [x] **Phase 4** — Usage Metering
 - [x] **Phase 5** — Billing & Webhooks (Stripe)
 - [x] **Phase 6** — Polish & Swagger Documentation
+- [x] **Phase 7** — Production Hardening (CI/CD, cursor pagination, query analysis, coverage)

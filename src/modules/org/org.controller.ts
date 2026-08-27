@@ -21,8 +21,23 @@ export const getOrg = async (req: Request, res: Response, next: NextFunction) =>
 
 export const listMembers = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const members = await orgService.listOrgMembers(req.params.orgId as string)
-        res.json(members)
+        const orgId = req.params.orgId as string;
+
+        // Parse cursor (opaque ISO timestamp) and limit from query params
+        const cursor = typeof req.query.cursor === 'string' && req.query.cursor
+            ? req.query.cursor
+            : undefined;
+        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 20));
+
+        const { members, nextCursor } = await orgService.listOrgMembers(orgId, limit, cursor);
+
+        res.json({
+            data: members,
+            pagination: {
+                limit,
+                nextCursor,   // null = no more pages; non-null = pass as ?cursor= on next request
+            },
+        });
     } catch (err) { next(err) }
 }
 
